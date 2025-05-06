@@ -3,13 +3,14 @@ from dotenv import load_dotenv
 import google.generativeai as genai
 import os
 from youtube_transcript_api import YouTubeTranscriptApi
+from pytube import Playlist, YouTube
+
+
 load_dotenv()
-
-
-
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
-prompt = """
+
+prompt_bullet_sum = """
     You are the Youtube video summarizer, 
     Given the transcript of a Youtube video,
     summarize the content in concise **bullet points**,
@@ -27,63 +28,98 @@ prompt_deep_notes = """
     like notes one would take during a lecture.
 """
 
+class YTSummarizer:
+    def __init__(self, url):
+        self.url = url
+        self.is_playlist = "playlist" in url or "list=" in url
+        self.video_links = self.extract_video_links()
 
-def extract_transcript_text(yt_video_url):
-    try:
-        video_id = yt_video_url.split("v=")[1]
-        transcript = YouTubeTranscriptApi.get_transcript(video_id)
-        transcript_text = " ".join([t["text"] for t in transcript])
-        return transcript_text
-    except Exception as e:
-        st.error(f"Error fetching transcript: {e}")
-        return None
+    def extract_video_links(self):
+        if self.is_playlist:
+            try:
+                pl = Playlist(self.url)
+                return pl.video_urls
+            except Exception as e:
+                st.error(f"Error loading playlist: {e}")
+                return []
+        else:
+            return [self.url]
 
+    def extract_transcript(self, video_url):
+        try:
+            video_id = video_url.split("v=")[1].split("&")[0]
+            transcript = YouTubeTranscriptApi.get_transcript(video_id)
+            transcript_text = " ".join([t["text"] for t in transcript])
+            return transcript_text
+        except Exception as e:
+            st.error(f"Transcript error for {video_url}: {e}")
+            return None
 
-def generate(transcript_text, prompt):
-    model = genai.GenerativeModel("gemini-1.5-pro")
-    response = model.generate_content(prompt + transcript_text)
-    return response.text
+    def generate_summary(self, transcript_text, style="bullet"):
+        prompt = prompt_bullet_sum if style == "bullet" else prompt_deep_notes
+        model = genai.GenerativeModel("gemini-2.0-flash")
+        try:
+            response = model.generate_content(prompt + transcript_text)
+            return response.text
+        except Exception as e:
+            st.error(f"Error generating summary: {e}")
+            return None
 
+    def get_video_thumbnail(self, video_url):
+        try:
+            video_id = video_url.split("v=")[1].split("&")[0]
+            return f"https://img.youtube.com/vi/{video_id}/0.jpg"
+        except:
+            return None
 
-st.title("Youtube Playlist Videos Summarizer")
-youtub_link = st.text_input("Enter Youtube Playlist or Video URL")
+    
 
-if youtub_link:
-    try:
-        video_id = youtub_link.split("v=")[1]
-        st.image(f"https://img.youtube.com/vi/{video_id}/0.jpg", caption="Youtube Video Thumbnail", use_container_width=True)
-    except IndexError:
-        st.error("Invalid Youtube URL. Please enter a valid URL.")
+st.title("YouTube Playlist & Video Summarizer")
 
+youtube_url = st.text_input("Enter Youtube Playlist or Video URL")
 
-col1, col2 = st.columns([1, 1])
-trigger_summary = False
-trigger_deep_notes = False
+if youtube_url:
+    summarizer = YTSummarizer(youtube_url)
 
+    if not summarizer.is_playlist:
+        thumb_url = summarizer.get_video_thumbnail(youtube_url)
+        if thumb_url:
+            st.image(thumb_url, caption="Youtube Video Thumbnail", use_container_width=True)
 
-with col1:
-    if st.button("🔹 Summarize in Bullet Points", use_container_width=True):
-        trigger_summary = True
+    col1, col2 = st.columns([1, 1])
+    trigger_summary = False
+    trigger_deep_notes = False
 
-with col2:
-    if st.button("🔹 Generate Deep Notes", use_container_width=True):
-        trigger_deep_notes = True
+    with col1:
+        if st.button("🔹 Summarize in Bullet Points", use_container_width=True):
+            trigger_summary = True
 
-# Row 4: Full width output, not inside column
-if youtub_link and (trigger_summary or trigger_deep_notes):
-    transcript_text = extract_transcript_text(youtub_link)
-    if transcript_text:
-        if trigger_summary:
-            with st.spinner("Generating point-wise summary..."):
-                summary = generate(transcript_text, prompt)
-            st.markdown("## 🔹 Point-wise Summary")
-            st.write(summary)
+    with col2:
+        if st.button("🔹 Generate Deep Notes", use_container_width=True):
+            trigger_deep_notes = True
 
-        if trigger_deep_notes:
-            with st.spinner("Generating detailed notes..."):
-                notes = generate(transcript_text, prompt_deep_notes)
-            st.markdown("## 🔹 Deep Notes")
-            st.write(notes)
-    else:
-        st.error("Transcript not available.")
+    if trigger_summary or trigger_deep_notes:
+        for idx, video_url in enumerate(summarizer.video_links, 1):
+            transcript = summarizer.extract_transcript(video_url)
+            if not transcript:
+                continue
+                
+            style = "bullet" if trigger_summary else "deep"
+            summary = summarizer.generate_summary(transcript, style)
+
+            st.markdown(f"---\n### 💻 Video [{idx}]({video_url})")
+            try:
+                thumb_url = summarizer.get_video_thumbnail(video_url)
+                st.image(thumb_url ,width=320)
+            except:
+                pass
+
+            if summary:
+                header = "point" if style == "bullet" else "Deep"
+                if header == "point":
+                    st.markdown("#### 🔹 Bullet Point Summary")
+                else:
+                    st.markdown("#### 🔹 Deep Notes")
+                st.write(summary)
+                
 
