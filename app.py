@@ -38,7 +38,7 @@ class YTSummarizer:
         if self.is_playlist:
             try:
                 pl = Playlist(self.url)
-                return pl.video_urls
+                return list(pl.video_urls)
             except Exception as e:
                 st.error(f"Error loading playlist: {e}")
                 return []
@@ -99,7 +99,7 @@ if youtube_url:
             trigger_deep_notes = True
 
     if trigger_summary or trigger_deep_notes:
-        for idx, video_url in enumerate(summarizer.video_links, 1):
+        for idx, video_url in enumerate(summarizer.video_links):
             transcript = summarizer.extract_transcript(video_url)
             if not transcript:
                 continue
@@ -107,7 +107,7 @@ if youtube_url:
             style = "bullet" if trigger_summary else "deep"
             summary = summarizer.generate_summary(transcript, style)
 
-            st.markdown(f"---\n### 💻 Video [{idx}]({video_url})")
+            st.markdown(f"---\n### 💻 Video [{idx+1}]({video_url})")
             try:
                 thumb_url = summarizer.get_video_thumbnail(video_url)
                 st.image(thumb_url ,width=320)
